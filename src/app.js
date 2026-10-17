@@ -103,6 +103,12 @@ export class PortainerApp {
     this.inFlight = new Map();
     this.activeCommands = 0;
     this.stateVersion = 0;
+    /**
+     * The wait after a failed reading (not a 429: that pause is in the store),
+     * kept across a reconnection to Gladys (reset()) for the same address and
+     * token: { identity, nextReadAt, retryDelay, message }.
+     */
+    this.retry = null;
     this.reset();
   }
 
@@ -233,7 +239,22 @@ export class PortainerApp {
       this.schedule(delay, () => this.connect(generation));
       return;
     }
+    // A reconnection to Gladys keeps the wait of a failed reading, and its
+    // growing delay; only the user skips it (button, saved configuration).
+    const { retry } = this;
+    if (!force && retry?.identity === this.identity() && this.now() < retry.nextReadAt) {
+      this.retryDelay = retry.retryDelay;
+      await this.setStatus(false, retry.message);
+      this.schedule(retry.nextReadAt - this.now(), () => this.connect(generation));
+      return;
+    }
+    this.retry = null;
     await this.connect(generation);
+  }
+
+  /** What a wait is about: the address and the token (kept in memory only). */
+  identity() {
+    return JSON.stringify([this.config.portainer?.base, this.config.token]);
   }
 
   pauseKey() {
@@ -325,7 +346,14 @@ export class PortainerApp {
     if (wasOnline || delay === INTERVALS.RETRY_MIN_MS) {
       this.logger.warn(`Portainer fails: ${err.message}`);
     }
-    await this.setStatus(false, this.errorMessage(err, delay));
+    const message = this.errorMessage(err, delay);
+    this.retry = {
+      identity: this.identity(),
+      nextReadAt: this.now() + delay,
+      retryDelay: this.retryDelay,
+      message,
+    };
+    await this.setStatus(false, message);
     this.schedule(delay, () => this.connect(generation));
   }
 
@@ -465,6 +493,7 @@ export class PortainerApp {
     this.skipped = skipped;
     this.online = true;
     this.retryDelay = INTERVALS.RETRY_MIN_MS;
+    this.retry = null;
 
     const discoveredKey = JSON.stringify([
       [...environments.values()].map((e) => [e.id, e.name]),

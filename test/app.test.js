@@ -489,6 +489,36 @@ test('Portainer down: retried 30 s, then doubling; never a dead integration', as
   assert.equal(gladys.fake.connectionStatus.connected, true);
 });
 
+test('a reconnection to Gladys keeps the wait and the growing delay after a failed reading', async () => {
+  const { gladys, portainer, timers, clock, app } = await setup();
+  portainer.unreachable = true;
+  await status(timers);
+  await timers.run();
+  assert.deepEqual(timers.delays(), [2 * INTERVALS.RETRY_MIN_MS]);
+  const before = gladys.fake.connectionStatus;
+  const statuses = gladys.fake.connectionStatuses.length;
+  const requests = portainer.requests.length;
+  clock.now += 10_000;
+  await gladys.disconnect();
+  await gladys.connect();
+  await app.queue;
+  assert.equal(portainer.requests.length, requests, 'not read again at once');
+  assert.deepEqual(timers.delays(), [2 * INTERVALS.RETRY_MIN_MS - 10_000], 'the same deadline');
+  assert.equal(gladys.fake.connectionStatuses.length, statuses + 1);
+  assert.deepEqual(gladys.fake.connectionStatus, before);
+  // The next failure keeps doubling.
+  await timers.run();
+  assert.ok(portainer.requests.length > requests);
+  assert.deepEqual(timers.delays(), [4 * INTERVALS.RETRY_MIN_MS]);
+  // Saving the configuration (the user asks) reads at once, and succeeds.
+  portainer.unreachable = false;
+  const asked = portainer.requests.length;
+  await gladys.fake.configUpdated({ ...BASE_CONFIG });
+  await app.queue;
+  assert.ok(portainer.requests.length > asked);
+  assert.equal(gladys.fake.connectionStatus.connected, true);
+});
+
 test('the buttons: test the connection, trust the new certificate', async () => {
   const { gladys } = await setup();
   const ack = await gladys.fake.action(ACTIONS.TEST);

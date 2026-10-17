@@ -13,6 +13,10 @@ the notes of the version's GitHub Release.
 ### Fixed
 
 - Status and Discovery republished after Gladys restarts.
+- A reconnection to Gladys no longer skips the wait after a failed reading
+  (Portainer down, 5xx, 403, TLS): the same deadline and the growing delay
+  are kept for the same address and token; saving the configuration or the
+  test button still reads at once.
 
 ## [0.1.1] - 2026-10-17
 
