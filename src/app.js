@@ -53,6 +53,8 @@ import { protectionOf, selfContainerId } from './portainer/parse.js';
 
 /** The "Test the connection" button waits 30 s: answer before. */
 const TEST_BUDGET_MS = 25_000;
+/** Entries per publishTransports call (the SDK refuses more). */
+export const TRANSPORTS_PER_CALL = 100;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const keyOf = (environmentId, name) => `${environmentId}-${name}`;
 
@@ -91,7 +93,14 @@ export class PortainerApp {
     this.epoch = 0;
     this.handles = new Set();
     this.queue = Promise.resolve();
-    this.commands = Promise.resolve();
+    /** One chain of commands per container (key): two containers never wait for each other. */
+    this.chains = new Map();
+    /**
+     * Containers whose command Docker has not answered yet: kept across a
+     * restart of the app (reset()), the request still runs.
+     * key -> { running } the state expected once Docker is done.
+     */
+    this.inFlight = new Map();
     this.activeCommands = 0;
     this.stateVersion = 0;
     this.lastStatus = null;
@@ -112,8 +121,8 @@ export class PortainerApp {
     this.transports = new Map();
     this.statsCursor = 0;
     this.statsRunning = false;
-    /** Containers whose stop / restart is still running in Docker. */
-    this.inFlight = new Set();
+    /** Statistics last accepted by Gladys (feature -> value), to budget only changes. */
+    this.publishedStats = new Map();
   }
 
   // --- Lifecycle -------------------------------------------------------------
@@ -179,8 +188,16 @@ export class PortainerApp {
       await this.setStatus(false, T.status.missingToken);
       return;
     }
+    if (config.tokenInvalid) {
+      await this.setStatus(false, T.status.tokenInvalid);
+      return;
+    }
     if (config.fingerprintInvalid) {
       await this.setStatus(false, T.status.fingerprintInvalid);
+      return;
+    }
+    if (config.tlsOverHttp) {
+      await this.setStatus(false, T.status.tlsOverHttp);
       return;
     }
     // A token Portainer refused with these very values is not tried again alone.
@@ -416,9 +433,22 @@ export class PortainerApp {
         total += 1;
         const key = keyOf(environment.id, container.name);
         const entry = { environmentId: environment.id, ...container };
+        const known = previous.get(key);
+        if (this.inFlight.has(key)) {
+          // A stop / restart sent by Gladys is still at work in Docker: its
+          // passing states are not published and fire nothing (the user asked
+          // for it); the state follows when Docker answers.
+          containers.set(
+            key,
+            known
+              ? { ...entry, running: known.running, stopped: known.stopped, state: known.state }
+              : entry,
+          );
+          continue;
+        }
         containers.set(key, entry);
         // The first reading of an environment (start, after an outage) fires nothing.
-        const was = before?.reachable ? previous.get(key) : undefined;
+        const was = before?.reachable ? known : undefined;
         if (!was) continue;
         if (was.running && !container.running && container.stopped) {
           events.push({ environment, container, problem: PROBLEMS.STOPPED });
@@ -505,7 +535,12 @@ export class PortainerApp {
   /** Discovery (scan button): read again when connected, else what is known. */
   async publishDiscovery() {
     if (this.online && !this.paused()) {
-      const applied = await this.refreshStatus({ publish: true }).catch(() => false);
+      const generation = this.generation;
+      const applied = await this.refreshStatus({ publish: true }).catch(async (err) => {
+        // A 429 pauses every path (the status says so); anything else: what is known.
+        if (err?.status === 429) await this.failed(err, generation);
+        return false;
+      });
       if (applied) return;
     }
     await this.publishDiscovered();
@@ -558,6 +593,8 @@ export class PortainerApp {
   async publishStates(states, { optional = false } = {}) {
     let list = states;
     if (optional) {
+      // The unchanged values cost nothing: the budget applies to the changes.
+      list = list.filter((s) => this.publishedStats.get(s.device_feature_external_id) !== s.state);
       const remaining = this.budget.remaining();
       if (list.length > remaining) {
         this.logger.debug(`${list.length - remaining} statistic(s) held back (state budget)`);
@@ -568,6 +605,9 @@ export class PortainerApp {
     try {
       const result = await this.gladys.publishChangedStates(list);
       this.budget.record(result?.count ?? list.length);
+      if (optional) {
+        for (const s of list) this.publishedStats.set(s.device_feature_external_id, s.state);
+      }
     } catch (err) {
       this.logger.warn(`States not published: ${err.message}`);
     }
@@ -593,11 +633,15 @@ export class PortainerApp {
     }
     const changed = entries.filter((e) => this.transports.get(e.external_id) !== e.transport);
     if (changed.length === 0) return;
-    for (const entry of changed) this.transports.set(entry.external_id, entry.transport);
-    await this.gladys.publishTransports(changed).catch((err) => {
-      for (const entry of changed) this.transports.delete(entry.external_id);
-      this.logger.debug(`Transports not published: ${err.message}`);
-    });
+    // The SDK takes 100 entries per call (500 containers can change at once).
+    for (let start = 0; start < changed.length; start += TRANSPORTS_PER_CALL) {
+      const batch = changed.slice(start, start + TRANSPORTS_PER_CALL);
+      for (const entry of batch) this.transports.set(entry.external_id, entry.transport);
+      await this.gladys.publishTransports(batch).catch((err) => {
+        for (const entry of batch) this.transports.delete(entry.external_id);
+        this.logger.debug(`Transports not published: ${err.message}`);
+      });
+    }
   }
 
   // --- Statistics: CPU and memory ----------------------------------------------
@@ -634,6 +678,7 @@ export class PortainerApp {
     const client = this.client;
     if (!client) return;
     const states = [];
+    const zeros = [];
     const running = [];
     for (const { environmentId, name } of createdDevices(this.gladys).containers) {
       if (!this.environments.get(environmentId)?.reachable) continue;
@@ -643,7 +688,7 @@ export class PortainerApp {
       if (container.running) {
         running.push({ container, ids });
       } else {
-        states.push(
+        zeros.push(
           { device_feature_external_id: ids.feature(FEATURES.CPU), state: 0 },
           { device_feature_external_id: ids.feature(FEATURES.MEMORY), state: 0 },
         );
@@ -679,41 +724,42 @@ export class PortainerApp {
     await Promise.all(Array.from({ length: LIMITS.STATS_CONCURRENCY }, worker));
     if (busy) throw busy;
     if (!this.current(generation, epoch) || client !== this.client) return;
-    await this.publishStates(states, { optional: true });
+    // The figures read first, the zeros of the stopped containers after.
+    await this.publishStates([...states, ...zeros], { optional: true });
   }
 
   // --- Commands --------------------------------------------------------------
   //
-  // Start (running on), stop (running off) and restart (the button) are all
-  // refused unless the user allowed them (`allow_container_control`, off by
-  // default), checked when the command arrives AND just before it is sent.
-  // Stop and restart are always refused for Gladys, Portainer (and its
-  // agent) and this integration's own container, recognized by image and by
-  // name, on the fresh reading of the container. Every command goes through
-  // one queue (one at a time), uses the client of the moment it arrived (a
-  // new configuration in between refuses it), and reads the container from
-  // Docker just before acting: unknown, the command is refused; already in
-  // the state asked, nothing is sent. Gladys waits 5 s: past 3.5 s after the
-  // command arrived, nothing is sent any more. Docker answers a stop once the
-  // container stopped (10 s of grace by default): Gladys gets its answer at
-  // most 4.3 s after the command, "sent", and the state follows when Docker
-  // is done. One command at a time per container.
+  // Start, stop and restart are three buttons (never a switch: the core hands
+  // every switch to the voice assistants, MCP and the switch scene actions).
+  // All three are refused unless the user allowed them
+  // (`allow_container_control`, off by default), checked when the command
+  // arrives AND just before it is sent. Stop and restart are always refused
+  // for Gladys (labels of the core, image, name), Portainer and its agent, any
+  // container that reaches the Docker socket, and this integration's own
+  // container, on the fresh reading of the container. Commands are chained
+  // per container (one at a time on a container, two containers never wait
+  // for each other: a scene stopping web then db stops both), use the client
+  // of the moment they arrived (a new configuration in between refuses them),
+  // and read the container from Docker just before acting: unknown, the
+  // command is refused; already in the state asked, nothing is sent. Gladys
+  // waits 5 s: past 3.5 s after the command arrived, nothing is sent any
+  // more. Docker answers a stop once the container stopped (10 s of grace by
+  // default): Gladys gets its answer at most 4.3 s after the command, "sent",
+  // and the state follows when Docker is done.
 
   async setValue(device, feature, value) {
     const received = this.now();
     const parsed = parseExternalId(this.gladys, feature?.external_id);
     if (parsed?.kind !== 'container') throw new Error(T.errors.unknownDevice);
-    const number = Number(value);
-    let action;
-    if (parsed.feature === FEATURES.RUNNING) {
-      if (number !== 0 && number !== 1) throw new Error(T.errors.invalidValue);
-      action = number === 1 ? 'start' : 'stop';
-    } else if (parsed.feature === FEATURES.RESTART) {
-      if (number !== 1) throw new Error(T.errors.invalidValue);
-      action = 'restart';
-    } else {
-      throw new Error(T.errors.unknownDevice);
-    }
+    const action = {
+      [FEATURES.START]: 'start',
+      [FEATURES.STOP]: 'stop',
+      [FEATURES.RESTART]: 'restart',
+    }[parsed.feature];
+    // `running` is a reading, never a command.
+    if (!action) throw new Error(T.errors.unknownDevice);
+    if (Number(value) !== 1) throw new Error(T.errors.invalidValue);
     if (!this.config.allowControl) throw new Error(T.errors.controlDisabled);
     const client = this.client;
     if (!client || this.blocked) throw new Error(T.errors.notConnected);
@@ -722,10 +768,15 @@ export class PortainerApp {
     if (this.inFlight.has(key)) throw new Error(T.errors.stillRunning);
     const generation = this.generation;
 
-    const run = this.commands.then(() =>
+    const previous = this.chains.get(key) ?? Promise.resolve();
+    const run = previous.then(() =>
       this.command(received, { client, generation, parsed, key, action }),
     );
-    this.commands = run.catch(() => {});
+    const chain = run.catch(() => {});
+    this.chains.set(key, chain);
+    chain.then(() => {
+      if (this.chains.get(key) === chain) this.chains.delete(key);
+    });
     return run;
   }
 
@@ -780,7 +831,16 @@ export class PortainerApp {
   /** Send, then answer Gladys on Docker's answer or at COMMAND_ACK_MS, whichever first. */
   async send({ client, generation, parsed, key, action, current, received, deadline }) {
     let sent = false;
-    this.inFlight.add(key);
+    const expected = action === 'stop' ? 'exited' : 'running';
+    const settle = () => {
+      this.observed(key, {
+        ...current,
+        running: expected === 'running',
+        stopped: expected !== 'running',
+        state: expected,
+      });
+    };
+    this.inFlight.set(key, { expected });
     const request = client
       .command(parsed.environmentId, current.id, action, {
         deadline,
@@ -788,6 +848,15 @@ export class PortainerApp {
           sent = true;
         },
       })
+      .then(
+        // Done: the state asked becomes the known state BEFORE the key leaves
+        // inFlight, so the next reading compares with it (no "stopped" event
+        // for a stop the user asked).
+        () => settle(),
+        (err) => {
+          throw err;
+        },
+      )
       .finally(() => {
         this.inFlight.delete(key);
         this.stateVersion += 1;
@@ -805,13 +874,6 @@ export class PortainerApp {
     ]);
     this.timers.clearTimeout(handle);
     if (outcome.done) {
-      const running = action !== 'stop';
-      this.observed(key, {
-        ...current,
-        running,
-        stopped: !running,
-        state: running ? 'running' : 'exited',
-      });
       await this.publishStatusStates();
       this.refreshSoon(generation);
       return;
@@ -821,7 +883,10 @@ export class PortainerApp {
       this.logger.info(`${action} of ${parsed.name} sent, Docker still at work`);
       request
         .then(
-          () => this.logger.info(`${action} of ${parsed.name} done`),
+          async () => {
+            this.logger.info(`${action} of ${parsed.name} done`);
+            if (generation === this.generation) await this.publishStatusStates();
+          },
           (err) => this.logger.warn(`${action} of ${parsed.name} failed: ${err.message}`),
         )
         .finally(() => this.refreshSoon(generation));
@@ -852,8 +917,10 @@ export class PortainerApp {
     if (generation !== this.generation) return;
     this.schedule(INTERVALS.AFTER_COMMAND_MS, async () => {
       if (generation !== this.generation || !this.online || this.paused()) return;
-      await this.refreshStatus({ publish: false }).catch((err) => {
-        this.logger.debug(`Reading after a command failed: ${err.message}`);
+      await this.refreshStatus({ publish: false }).catch(async (err) => {
+        // A 429 pauses every path; anything else waits for the status loop.
+        if (err?.status === 429) await this.failed(err, generation);
+        else this.logger.debug(`Reading after a command failed: ${err.message}`);
       });
     });
   }
@@ -862,6 +929,8 @@ export class PortainerApp {
 
   async deviceCreated(device) {
     const parsed = parseExternalId(this.gladys, device?.external_id);
+    // The SDK forgot the values of this device: so do the statistics.
+    this.publishedStats.clear();
     if (!parsed || !this.online) return;
     await this.publishStatusStates();
     await this.publishTransports();

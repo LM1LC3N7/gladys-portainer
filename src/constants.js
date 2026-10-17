@@ -26,6 +26,8 @@ export const FEATURES = Object.freeze({
   HEALTHY: 'healthy',
   CPU: 'cpu',
   MEMORY: 'memory',
+  START: 'start',
+  STOP: 'stop',
   RESTART: 'restart',
   RUNNING_COUNT: 'running_count',
   STOPPED_COUNT: 'stopped_count',
@@ -111,6 +113,14 @@ export const MAX_BYTES = Object.freeze({
   STATS: 512 * 1024,
   COMMAND: 64 * 1024,
 });
+
+/**
+ * Labels the Gladys core puts on the containers it creates (the integrations
+ * and their sub-containers, `io.gladysassistant.external-integration`,
+ * `io.gladysassistant.container`...): any `io.gladysassistant.*` label
+ * protects a container from stop and restart.
+ */
+export const GLADYS_LABEL_PREFIX = 'io.gladysassistant.';
 
 /** The persistent store (TLS pin, refusals, pause: see src/store.js). */
 export const STORE_FILE = 'portainer.json';

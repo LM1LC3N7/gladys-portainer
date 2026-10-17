@@ -77,6 +77,8 @@ test('inspect: the image reference of the container, the running flag', () => {
       state: 'running',
       running: true,
       health: 'healthy',
+      gladysLabel: false,
+      dockerSocket: false,
     },
   );
   assert.equal(parseInspect({ Id: ID, Name: '/web', State: {} }), null, 'no running flag');
@@ -84,14 +86,15 @@ test('inspect: the image reference of the container, the running flag', () => {
 });
 
 test('stats: like docker stats (CPU of all cores, memory without the page cache)', () => {
-  assert.deepEqual(computeStats(STATS), { cpu: 20, memory: 200 });
+  // 200 MiB = 209.7 MB (the `megabyte` of Gladys is 10^6 bytes).
+  assert.deepEqual(computeStats(STATS), { cpu: 20, memory: 209.7 });
   // cgroup v1: total_inactive_file, percpu_usage for the CPU count.
   const v1 = {
     cpu_stats: { cpu_usage: { total_usage: 300, percpu_usage: [1, 2] }, system_cpu_usage: 2000 },
     precpu_stats: { cpu_usage: { total_usage: 100 }, system_cpu_usage: 1000 },
     memory_stats: { usage: 10 * 1048576, stats: { total_inactive_file: 4 * 1048576 } },
   };
-  assert.deepEqual(computeStats(v1), { cpu: 40, memory: 6 });
+  assert.deepEqual(computeStats(v1), { cpu: 40, memory: 6.3 });
   // The first sample of a container (no precpu): no CPU figure.
   assert.deepEqual(computeStats({ cpu_stats: STATS.cpu_stats, precpu_stats: {} }), {
     cpu: null,
@@ -114,6 +117,61 @@ test('protection: Gladys, Portainer, its agent and our own container, by image o
   assert.equal(p('web', 'nginx:1.27'), null);
   assert.equal(p('web', 'myregistry/notgladys:1'), null);
   assert.equal(p('web', 'portainer/helper-reset-password'), null);
+});
+
+test('protection: the labels of the Gladys core and the Docker socket, from the list and inspect', () => {
+  const [labelled, socket, binds, plain] = parseContainers([
+    {
+      Id: 'a'.repeat(64),
+      Names: ['/zigbee'],
+      Image: 'koenkk/zigbee2mqtt',
+      State: 'running',
+      Labels: { 'io.gladysassistant.external-integration': 'zigbee2mqtt' },
+    },
+    {
+      Id: 'b'.repeat(64),
+      Names: ['/proxy'],
+      Image: 'tecnativa/docker-socket-proxy',
+      State: 'running',
+      Mounts: [
+        { Type: 'bind', Source: '/var/run/docker.sock', Destination: '/var/run/docker.sock' },
+      ],
+    },
+    {
+      Id: 'c'.repeat(64),
+      Names: ['/srv'],
+      Image: 'x',
+      State: 'running',
+      Mounts: [{ Type: 'bind', Source: '/srv/docker.sock.d', Destination: '/run/x' }],
+    },
+    { Id: 'd'.repeat(64), Names: ['/web'], Image: 'nginx', State: 'running', Labels: {} },
+  ]).sort((a, b) => a.id.localeCompare(b.id));
+  assert.equal(protectionOf(labelled), 'gladys');
+  assert.equal(protectionOf(socket), 'docker');
+  assert.equal(protectionOf(binds), null, 'not the socket itself');
+  assert.equal(protectionOf(plain), null);
+  const inspected = parseInspect({
+    Id: ID,
+    Name: '/home',
+    Config: { Image: 'sha256:1234', Labels: { 'IO.GladysAssistant.Container': 'core' } },
+    State: { Status: 'running', Running: true },
+    HostConfig: { Binds: ['/var/run/docker.sock:/var/run/docker.sock:ro'] },
+  });
+  assert.equal(inspected.gladysLabel, true);
+  assert.equal(inspected.dockerSocket, true);
+  assert.equal(
+    protectionOf(
+      parseInspect({
+        Id: ID,
+        Name: '/home',
+        Config: { Image: 'sha256:1234' },
+        State: { Status: 'running', Running: true },
+        HostConfig: { Binds: ['/var/run/docker.sock:/var/run/docker.sock:ro'] },
+      }),
+    ),
+    'docker',
+    'the core created from an image id and renamed',
+  );
 });
 
 test('our own container id comes from HOSTNAME when Docker set it', () => {

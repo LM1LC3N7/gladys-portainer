@@ -50,11 +50,14 @@ scripts/cover.mjs                 generates cover.png (plain Node)
 .github/scripts/release.mjs       release helpers (manifest bump, changelog), tested in test/
 ```
 
-Safety rules of this integration (TODO.md, "Decisions"): start, stop and
-restart stay refused unless `allow_container_control`; stop and restart are
-always refused for Gladys, Portainer, its agent and our own container (image
-and name, on a fresh inspect); every command is serialized, re-reads the
-container before acting and sends nothing past 3.5 s; a token Portainer
+Safety rules of this integration (TODO.md, "Decisions"): never a
+`switch` feature (the core gives switches to voice assistants and "turn
+everything off"): start, stop and restart are buttons, refused unless
+`allow_container_control`; stop and restart are always refused for Gladys
+(core labels, image, name), Portainer, its agent, any container on the
+Docker socket and our own container (on a fresh inspect); commands are
+chained per container, re-read the container before acting and send
+nothing past 3.5 s; a token Portainer
 refused (401) is never retried without a user action; the certificate is
 checked before the token is written.
 

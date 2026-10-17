@@ -95,6 +95,14 @@ export const T = {
       en: 'The certificate fingerprint must be a SHA-256 fingerprint: 64 hexadecimal digits, colons allowed.',
       fr: 'L’empreinte du certificat doit être une empreinte SHA-256 : 64 chiffres hexadécimaux, deux-points permis.',
     },
+    tokenInvalid: {
+      en: 'The access token holds a space or an invisible character (copied with it?): paste it again, only the token (it starts with ptr_).',
+      fr: 'Le jeton d’accès contient une espace ou un caractère invisible (copié avec ?) : collez-le de nouveau, le jeton seul (il commence par ptr_).',
+    },
+    tlsOverHttp: {
+      en: 'The certificate options only apply to https: the address uses http://, where nothing is checked and the token crosses the network in clear. Use the https address of Portainer, or clear the certificate options.',
+      fr: 'Les options de certificat ne valent qu’en https : l’adresse utilise http://, où rien n’est vérifié et le jeton traverse le réseau en clair. Utilisez l’adresse https de Portainer, ou videz les options de certificat.',
+    },
     tokenRefused: {
       en: 'Portainer refused the access token (HTTP 401: wrong, revoked or expired). Gladys does not try again by itself: create a new token in Portainer, paste it and save, or press "Test the connection".',
       fr: 'Portainer a refusé le jeton d’accès (HTTP 401 : faux, révoqué ou expiré). Gladys ne réessaie pas seul : créez un nouveau jeton dans Portainer, collez-le et enregistrez, ou appuyez sur « Tester la connexion ».',
@@ -126,8 +134,8 @@ export const T = {
     notPortainer: (delay) =>
       join(
         {
-          en: 'This address does not answer like Portainer: check the scheme and the port (9443 for https, 9000 for http).',
-          fr: 'Cette adresse ne répond pas comme Portainer : vérifiez le protocole et le port (9443 en https, 9000 en http).',
+          en: 'This address does not answer like Portainer: check the scheme and the port (Portainer itself: 9443 for https, 9000 for http; behind a reverse proxy: its address and path).',
+          fr: 'Cette adresse ne répond pas comme Portainer : vérifiez le protocole et le port (Portainer lui-même : 9443 en https, 9000 en http ; derrière un proxy inverse : son adresse et son chemin).',
         },
         RETRY(delay),
       ),
@@ -177,9 +185,11 @@ export const T = {
           gladys: 'part of Gladys',
           portainer: 'Portainer itself (or its agent)',
           self: 'the container of this integration',
+          docker: 'connected to the Docker socket (it manages other containers)',
         }[why] ?? 'protected'
       }: Gladys never stops nor restarts it. Nothing was sent`,
-    tooSlow: 'Portainer answered too slowly: nothing was sent, try again',
+    tooSlow:
+      'The command could not be checked in time (Gladys waits 5 s for its answer): nothing was sent, try again',
     unknownState: (err) =>
       `The current state could not be read (${reasonOf(err).en}): nothing was sent`,
     unknownContainer: 'This container no longer exists in this environment: nothing was sent',

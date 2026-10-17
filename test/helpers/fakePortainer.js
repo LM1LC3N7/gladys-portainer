@@ -14,7 +14,7 @@ const hex = (seed) => seed.repeat(64).slice(0, 64);
 
 export function dockerContainer(
   name,
-  { state = 'running', health, image = 'nginx:1.27', id } = {},
+  { state = 'running', health, image = 'nginx:1.27', id, labels = {}, mounts = [] } = {},
 ) {
   const status =
     state === 'running'
@@ -26,7 +26,13 @@ export function dockerContainer(
     Image: image,
     State: state,
     Status: status,
-    Labels: { 'com.docker.compose.project': 'home' },
+    Labels: { 'com.docker.compose.project': 'home', ...labels },
+    Mounts: mounts.map((source) => ({
+      Type: 'bind',
+      Source: source,
+      Destination: source,
+      RW: true,
+    })),
     healthcheck: health !== undefined,
     health,
   };
@@ -124,7 +130,9 @@ export function createFakePortainer() {
       return json(200, {
         Id: container.Id,
         Name: container.Names[0],
-        Config: { Image: container.Image },
+        Config: { Image: container.Image, Labels: container.Labels },
+        Mounts: container.Mounts,
+        HostConfig: { Binds: container.Mounts.map((m) => `${m.Source}:${m.Destination}`) },
         State: {
           Status: container.State,
           Running: container.State === 'running',

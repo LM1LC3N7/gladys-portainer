@@ -10,7 +10,12 @@
 // `docker stats` command.
 // -----------------------------------------------------------------------------
 
-import { DOCKER_ENVIRONMENT_TYPES, ENVIRONMENT_UP, STOPPED_STATES } from '../constants.js';
+import {
+  DOCKER_ENVIRONMENT_TYPES,
+  ENVIRONMENT_UP,
+  GLADYS_LABEL_PREFIX,
+  STOPPED_STATES,
+} from '../constants.js';
 
 /** A Docker container name, as Docker accepts it (no `:`, no `/`). */
 export const NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
@@ -58,6 +63,35 @@ export function healthOf(raw) {
   return null;
 }
 
+/** Does the container carry a label of the Gladys core (`io.gladysassistant.*`)? */
+function hasGladysLabel(labels) {
+  if (!isObject(labels)) return false;
+  return Object.keys(labels).some((key) => key.toLowerCase().startsWith(GLADYS_LABEL_PREFIX));
+}
+
+const DOCKER_SOCKET = /(^|\/)docker\.sock$/;
+
+/**
+ * Does the container reach the Docker socket (a bind of `docker.sock`, or a
+ * socket proxy)? Such a container manages the others: Portainer, its agent,
+ * the Gladys core, a socket proxy, Watchtower...
+ */
+function mountsDockerSocket(mounts, binds) {
+  const paths = [];
+  for (const mount of Array.isArray(mounts) ? mounts : []) {
+    if (!isObject(mount)) continue;
+    paths.push(text(mount.Source), text(mount.Destination));
+  }
+  for (const bind of Array.isArray(binds) ? binds : []) {
+    paths.push(
+      ...String(bind ?? '')
+        .split(':')
+        .slice(0, 2),
+    );
+  }
+  return paths.some((path) => typeof path === 'string' && DOCKER_SOCKET.test(path.trim()));
+}
+
 /** A Docker state, lower case, or null. */
 const stateOf = (value) =>
   typeof value === 'string' && /^[a-z]{1,16}$/.test(value) ? value : null;
@@ -89,6 +123,8 @@ export function parseContainers(json) {
       running: state === 'running',
       stopped: state !== null && STOPPED_STATES.includes(state),
       health: healthOf(raw),
+      gladysLabel: hasGladysLabel(raw.Labels),
+      dockerSocket: mountsDockerSocket(raw.Mounts),
     });
   }
   return containers.sort((a, b) => a.name.localeCompare(b.name));
@@ -112,10 +148,13 @@ export function parseInspect(json) {
     state: stateOf(json.State.Status),
     running,
     health: healthOf(json),
+    gladysLabel: hasGladysLabel(json.Config?.Labels),
+    dockerSocket: mountsDockerSocket(json.Mounts, json.HostConfig?.Binds),
   };
 }
 
-const MIB = 1024 * 1024;
+/** Megabytes (10^6 bytes, the `megabyte` unit of Gladys). */
+const MB = 1_000_000;
 const round1 = (value) => Math.round(value * 10) / 10;
 const finite = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : null);
 
@@ -123,8 +162,9 @@ const finite = (value) => (typeof value === 'number' && Number.isFinite(value) ?
  * GET /docker/containers/{id}/stats?stream=false -> { cpu, memory } (each
  * null when it cannot be computed), like `docker stats`:
  *   cpu    % of one CPU times the CPUs online (400 % = 4 CPUs busy)
- *   memory MiB used, the page cache excluded (`inactive_file` on cgroup v2,
- *          `total_inactive_file` on cgroup v1)
+ *   memory MB (10^6 bytes) used, the page cache excluded (`inactive_file`
+ *          on cgroup v2, `total_inactive_file` on cgroup v1); `docker stats`
+ *          shows MiB, Gladys has megabytes
  */
 export function computeStats(json) {
   if (!isObject(json)) return { cpu: null, memory: null };
@@ -153,7 +193,7 @@ export function computeStats(json) {
     const cache =
       finite(stats.inactive_file) ?? finite(stats.total_inactive_file) ?? finite(stats.cache) ?? 0;
     const used = cache >= 0 && cache < usage ? usage - cache : usage;
-    memory = round1(used / MIB);
+    memory = round1(used / MB);
   }
   return { cpu, memory };
 }
@@ -170,18 +210,23 @@ const PROTECTED_NAME = /^(gladys|portainer)/i;
 
 /**
  * Why a container may not be stopped or restarted from Gladys, or null:
- *   'gladys'     Gladys, its integrations and their sub-containers
- *   'portainer'  Portainer and its agent (the way back to every container)
  *   'self'       the container this integration runs in
+ *   'gladys'     Gladys, its integrations and their sub-containers (labels
+ *                of the core, image, name)
+ *   'portainer'  Portainer and its agent (the way back to every container)
+ *   'docker'     any container that reaches the Docker socket (it manages
+ *                the others: the Gladys core, a socket proxy...)
  * Starting such a container stays possible.
  */
-export function protectionOf({ id, name, image }, selfId = null) {
+export function protectionOf({ id, name, image, gladysLabel, dockerSocket }, selfId = null) {
   if (selfId && typeof id === 'string' && id.startsWith(selfId)) return 'self';
+  if (gladysLabel) return 'gladys';
   const ref = String(image ?? '');
   if (PORTAINER_IMAGE.test(ref)) return 'portainer';
   if (GLADYS_IMAGE.test(ref)) return 'gladys';
   const match = PROTECTED_NAME.exec(String(name ?? ''));
   if (match) return match[1].toLowerCase();
+  if (dockerSocket) return 'docker';
   return null;
 }
 

@@ -2,7 +2,7 @@
 
 [Gladys Assistant](https://gladysassistant.com) external integration for
 **Portainer** (CE / BE 2.x): each Docker container becomes a Gladys device
-(running switch, health, CPU, memory, restart button), each environment a
+(running, health, CPU, memory, start / stop / restart buttons), each environment a
 device with its counts, and a stopped or unhealthy container a scene trigger.
 Commands are off by default; Gladys and Portainer are never stopped.
 **Unofficial integration, not affiliated with Portainer.io. Never tested
@@ -41,11 +41,15 @@ Gladys ⇄ SDK ⇄ src/app.js (PortainerApp)
 - **Statistics** (every 60 s by default): `containers/{id}/stats?stream=false`
   for the created containers that run, 25 per round, 3 at a time; dropped
   first when the 250 states/min budget is used.
-- **Commands** (`allow_container_control`, off by default): one queue, the
-  container inspected by name just before acting, stop / restart refused for
-  Gladys, Portainer, its agent and our own container (image and name), nothing
-  sent past 3.5 s, Gladys answered at most 4.3 s after the command, one
-  command at a time per container.
+- **Commands** (`allow_container_control`, off by default): three push
+  buttons (start, stop, restart), never a switch (the core gives switches to
+  voice assistants, MCP and "turn off" scene actions); one chain per
+  container (two containers never wait for each other), the container
+  inspected by name just before acting, stop / restart refused for Gladys
+  (core labels, image, name), Portainer, its agent, any container on the
+  Docker socket and our own container, nothing sent past 3.5 s, Gladys
+  answered at most 4.3 s after the command; a stop asked from Gladys never
+  fires the trigger.
 
 ## Development
 

@@ -170,9 +170,19 @@ export function httpRequest(
       req.end();
     };
 
+    // lib.request throws synchronously on a header it refuses (an invisible
+    // character in the token: ERR_INVALID_CHAR): a failure, never a crash.
+    const safeSend = (createConnection) => {
+      try {
+        send(createConnection);
+      } catch (err) {
+        finish(transportError(err));
+      }
+    };
+
     const fixed = trust.fingerprint ? normalizeFingerprint(trust.fingerprint) : null;
     if (target.protocol !== 'https:' || (!fixed && !trust.trustOnFirstUse)) {
-      send();
+      safeSend();
       return;
     }
 
@@ -204,7 +214,7 @@ export function httpRequest(
           if (!pin) trust.onPin?.(fingerprint);
         }
       }
-      send(() => socket);
+      safeSend(() => socket);
     });
   });
 }

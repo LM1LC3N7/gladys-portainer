@@ -193,28 +193,47 @@ test('trigger: a running container that stops, a healthcheck that turns unhealth
   assert.equal(gladys.fake.sceneEvents.length, 2, 'no repeat while it stays so');
 });
 
+const press = (gladys, d, key, value = 1) => gladys.fake.setValue(d, feature(d, key), value);
+
+test('running is a reading, never a switch: no voice assistant can stop a container', () => {
+  const running = feature(device(LOCAL, 'web'), 'running');
+  assert.equal(running.read_only, true);
+  assert.notEqual(running.category, 'switch');
+  const buttons = device(LOCAL, 'web').features.filter((f) => !f.read_only);
+  assert.deepEqual(
+    buttons.map((f) => [f.external_id.split(':').at(-1), f.category, f.type]),
+    [
+      ['start', 'button', 'push'],
+      ['stop', 'button', 'push'],
+      ['restart', 'button', 'push'],
+    ],
+  );
+});
+
 test('commands are refused by default, nothing reaches Portainer', async () => {
   const { gladys, portainer } = await setup();
   const db = device(LOCAL, 'db');
-  const ack = await gladys.fake.setValue(db, feature(db, 'running'), 0);
-  assert.equal(ack.success, false);
-  assert.match(ack.error, /off: allow it first/);
-  const restart = await gladys.fake.setValue(db, feature(db, 'restart'), 1);
-  assert.equal(restart.success, false);
+  for (const key of ['stop', 'start', 'restart']) {
+    const ack = await press(gladys, db, key);
+    assert.equal(ack.success, false, key);
+    assert.match(ack.error, /off: allow it first/);
+  }
   assert.equal(portainer.commands.length, 0);
 });
 
 test('commands when allowed: stop, start, restart; the state read first', async () => {
   const { gladys, portainer } = await setup({ config: { allow_container_control: true } });
   const db = device(LOCAL, 'db');
-  let ack = await gladys.fake.setValue(db, feature(db, 'running'), 0);
+  const off = await press(gladys, db, 'running', 0);
+  assert.equal(off.success, false, 'the running state takes no command');
+  let ack = await press(gladys, db, 'stop');
   assert.equal(ack.success, true, ack.error);
   assert.equal(state(gladys, LOCAL, 'db', 'running'), 0);
-  ack = await gladys.fake.setValue(db, feature(db, 'running'), 0);
+  ack = await press(gladys, db, 'stop');
   assert.equal(ack.success, true, 'already stopped: nothing sent');
-  ack = await gladys.fake.setValue(db, feature(db, 'running'), 1);
+  ack = await press(gladys, db, 'start');
   assert.equal(ack.success, true, ack.error);
-  ack = await gladys.fake.setValue(db, feature(db, 'restart'), 1);
+  ack = await press(gladys, db, 'restart');
   assert.equal(ack.success, true, ack.error);
   assert.deepEqual(
     portainer.commands.map((c) => c.verb),
@@ -231,62 +250,92 @@ test('commands when allowed: stop, start, restart; the state read first', async 
       r.path.endsWith(`/containers/${portainer.containers[1][1].Id}/stop`),
     ),
   );
-  ack = await gladys.fake.setValue(db, feature(db, 'running'), 2);
-  assert.equal(ack.success, false);
+  ack = await press(gladys, db, 'stop', 0);
+  assert.equal(ack.success, false, 'a button takes 1 only');
 });
 
-test('Gladys, Portainer and our own container are never stopped nor restarted', async () => {
+test('Gladys, Portainer, the Docker socket and our own container are never stopped nor restarted', async () => {
   const self = 'abcdef012345';
   const portainer = createFakePortainer();
+  const add = (name, options) =>
+    portainer.containers[1].push(
+      dockerContainer(name, { id: String(portainer.containers[1].length).repeat(64), ...options }),
+    );
   portainer.containers[1].push(dockerContainer('integration', { id: self + '0'.repeat(52) }));
   // Renamed, but still the image of Portainer.
-  portainer.containers[1].push(
-    dockerContainer('mgmt', { image: 'portainer/portainer-ee:lts', id: '1'.repeat(64) }),
-  );
+  add('mgmt', { image: 'portainer/portainer-ee:lts' });
+  // An integration renamed, whose image says nothing: the label of the core.
+  add('zigbee', { image: 'koenkk/zigbee2mqtt', labels: { 'io.gladysassistant.container': 'x' } });
+  // The core created from an image id and renamed: it mounts the Docker socket.
+  add('home', { image: 'sha256:abcd', mounts: ['/var/run/docker.sock'] });
+  // A socket proxy.
+  add('socket-proxy', { image: 'tecnativa/docker-socket-proxy', mounts: ['/run/docker.sock'] });
+  const names = ['gladys', 'portainer', 'integration', 'mgmt', 'zigbee', 'home', 'socket-proxy'];
   const { gladys } = await setup({
     portainer,
     selfId: self,
     config: { allow_container_control: true },
-    created: [
-      [LOCAL, 'gladys'],
-      [LOCAL, 'portainer'],
-      [LOCAL, 'integration'],
-      [LOCAL, 'mgmt'],
-    ],
+    created: names.map((n) => [LOCAL, n]),
   });
-  for (const name of ['gladys', 'portainer', 'integration', 'mgmt']) {
+  for (const name of names) {
     const d = device(LOCAL, name);
-    const stop = await gladys.fake.setValue(d, feature(d, 'running'), 0);
+    const stop = await press(gladys, d, 'stop');
     assert.equal(stop.success, false, name);
     assert.match(stop.error, /never stops nor restarts it/);
-    const restart = await gladys.fake.setValue(d, feature(d, 'restart'), 1);
+    const restart = await press(gladys, d, 'restart');
     assert.equal(restart.success, false, name);
   }
   assert.equal(portainer.commands.length, 0);
   // Starting one stays possible (it is already running: nothing sent).
-  const d = device(LOCAL, 'gladys');
-  assert.equal((await gladys.fake.setValue(d, feature(d, 'running'), 1)).success, true);
+  assert.equal((await press(gladys, device(LOCAL, 'gladys'), 'start')).success, true);
 });
 
-test('a slow stop: Gladys gets its answer within the ack delay, the state follows', async () => {
+test('two containers never wait for each other (a scene stopping web then db stops both)', async () => {
+  const { gladys, portainer, timers } = await setup({ config: { allow_container_control: true } });
+  let release;
+  portainer.commandGate = new Promise((resolve) => (release = resolve));
+  const web = press(gladys, device(LOCAL, 'web'), 'stop');
+  const db = press(gladys, device(LOCAL, 'db'), 'stop');
+  for (let i = 0; i < 20; i += 1) await tick();
+  assert.deepEqual(
+    portainer.commands.map((c) => c.name).sort(),
+    ['db', 'web'],
+    'both sent before any answer',
+  );
+  await timers.run((ms) => ms === COMMAND_ACK_MS);
+  assert.equal((await web).success, true);
+  assert.equal((await db).success, true);
+  release();
+});
+
+test('a slow stop: answered within the ack delay, no "stopped" event, the state follows', async () => {
   const { gladys, portainer, timers } = await setup({ config: { allow_container_control: true } });
   let release;
   portainer.commandGate = new Promise((resolve) => (release = resolve));
   const db = device(LOCAL, 'db');
-  const pending = gladys.fake.setValue(db, feature(db, 'running'), 0);
+  const pending = press(gladys, db, 'stop');
   for (let i = 0; i < 10; i += 1) await tick();
   assert.ok(timers.delays().includes(COMMAND_ACK_MS), 'the ack timer waits');
   await timers.run((ms) => ms === COMMAND_ACK_MS);
   const ack = await pending;
   assert.equal(ack.success, true, ack.error);
   // A second command on the same container while Docker is at work: refused.
-  const again = await gladys.fake.setValue(db, feature(db, 'running'), 1);
+  const again = await press(gladys, db, 'start');
   assert.equal(again.success, false);
   assert.match(again.error, /still running/);
+  // Docker is stopping it: a reading meanwhile neither fires nor publishes it.
+  const container = portainer.containers[1][1];
+  container.State = 'exited';
+  container.Status = 'Exited (0) 1 second ago';
+  await status(timers);
+  assert.equal(state(gladys, LOCAL, 'db', 'running'), 1);
   release();
   for (let i = 0; i < 10; i += 1) await tick();
+  assert.equal(state(gladys, LOCAL, 'db', 'running'), 0, 'published once Docker answered');
   await timers.run((ms) => ms === INTERVALS.AFTER_COMMAND_MS);
+  await status(timers);
   assert.equal(state(gladys, LOCAL, 'db', 'running'), 0);
+  assert.equal(gladys.fake.sceneEvents.length, 0, 'a stop the user asked is not a problem');
 });
 
 test('a command past the budget is refused before anything is sent', async () => {
@@ -301,9 +350,9 @@ test('a command past the budget is refused before anything is sent', async () =>
   };
   app.client.request = portainer.request;
   const db = device(LOCAL, 'db');
-  const ack = await gladys.fake.setValue(db, feature(db, 'running'), 0);
+  const ack = await press(gladys, db, 'stop');
   assert.equal(ack.success, false);
-  assert.match(ack.error, /too slowly: nothing was sent/);
+  assert.match(ack.error, /could not be checked in time .*: nothing was sent/);
   assert.equal(portainer.commands.length, 0);
 });
 
@@ -315,13 +364,29 @@ test('statistics: only created containers that run, within the state budget', as
   assert.equal(statsPaths.length, 4);
   assert.ok(!statsPaths.some((p) => p.includes(portainer.containers[1][2].Id)), 'worker not read');
   assert.equal(state(gladys, LOCAL, 'web', 'cpu'), 20);
-  assert.equal(state(gladys, LOCAL, 'web', 'memory'), 200);
+  assert.equal(state(gladys, LOCAL, 'web', 'memory'), 209.7, 'MB, 10^6 bytes');
   assert.equal(state(gladys, LOCAL, 'worker', 'cpu'), 0);
-  // The budget: statistics are held back once the minute is used.
+  // The budget: changed statistics are held back once the minute is used.
   app.budget.record(LIMITS.STATES_PER_MINUTE);
   portainer.stats = { ...portainer.stats, memory_stats: { usage: 500 * 1048576 } };
   await timers.run((ms) => ms === 60_000);
-  assert.equal(state(gladys, LOCAL, 'web', 'memory'), 200, 'held back');
+  assert.equal(state(gladys, LOCAL, 'web', 'memory'), 209.7, 'held back');
+});
+
+test('statistics: the figures read go before the zeros of the stopped containers', async () => {
+  const { gladys, timers, app } = await setup();
+  // Room for 2 changes only: the figures of web win over the zeros of worker.
+  app.budget.record(app.budget.remaining() - 2);
+  await timers.run((ms) => ms === 5_000);
+  const stats = gladys.fake.states.filter((s) =>
+    /:(cpu|memory)$/.test(s.device_feature_external_id),
+  );
+  assert.equal(stats.length, 2);
+  assert.ok(
+    stats.every((s) => s.state !== 0),
+    'figures, not zeros',
+  );
+  assert.equal(state(gladys, LOCAL, 'worker', 'cpu'), undefined);
 });
 
 test('statistics: 25 per round at most, in turn', async () => {
@@ -376,7 +441,7 @@ test('HTTP 429: every path pauses, kept across a restart', async () => {
   assert.match(gladys.fake.connectionStatus.message.en, /slow down/);
   assert.deepEqual(timers.delays(), [120_000]);
   const db = device(LOCAL, 'db');
-  const ack = await gladys.fake.setValue(db, feature(db, 'running'), 0);
+  const ack = await press(gladys, db, 'stop');
   assert.equal(ack.success, false);
   assert.match(ack.error, /slow down/);
   await running.stop();
@@ -413,12 +478,55 @@ test('the configuration is checked before anything is sent', async () => {
     [{ url: '' }, /Type the address/],
     [{ token: '' }, /access token of Portainer/],
     [{ certificate_fingerprint: 'AB:CD' }, /SHA-256 fingerprint/],
+    [{ token: 'ptr_abc​def' }, /invisible character/],
+    [{ allow_self_signed: true }, /only apply to https/],
+    [{ certificate_fingerprint: 'AB'.repeat(32) }, /only apply to https/],
   ]) {
     const { gladys, portainer } = await setup({ config });
     assert.match(gladys.fake.connectionStatus.message.en, pattern);
     assert.equal(portainer.requests.length, 0);
     await running.stop();
   }
+});
+
+test('HTTP 429 met by Discovery or by the reading after a command pauses everything', async () => {
+  const { gladys, portainer, timers } = await setup({ config: { allow_container_control: true } });
+  portainer.failures.push({ path: '/api/endpoints', status: 429 });
+  await gladys.fake.scanRequest();
+  assert.match(gladys.fake.connectionStatus.message.en, /slow down/);
+  assert.deepEqual(timers.delays(), [INTERVALS.BUSY_MIN_MS]);
+
+  const second = await setup({ config: { allow_container_control: true } });
+  const ack = await press(second.gladys, device(LOCAL, 'db'), 'stop');
+  assert.equal(ack.success, true, ack.error);
+  second.portainer.failures.push({ path: '/api/endpoints', status: 429 });
+  await second.timers.run((ms) => ms === INTERVALS.AFTER_COMMAND_MS);
+  assert.match(second.gladys.fake.connectionStatus.message.en, /slow down/);
+  assert.deepEqual(second.timers.delays(), [INTERVALS.BUSY_MIN_MS]);
+  await running.stop();
+});
+
+test('more than 100 badges go in several calls', async () => {
+  const portainer = createFakePortainer();
+  const names = Array.from({ length: 130 }, (_, i) => `svc${String(i).padStart(3, '0')}`);
+  portainer.containers[1] = names.map((n, i) =>
+    dockerContainer(n, { id: (i + 16).toString(16).padStart(4, '0').repeat(16) }),
+  );
+  const { gladys, logs } = await setup({ portainer, created: names.map((n) => [LOCAL, n]) });
+  assert.equal(gladys.fake.transports.length, 131);
+  assert.ok(!logs.some((l) => l.includes('Transports not published')));
+});
+
+test('the token is never written to /data', async () => {
+  const { readFileSync, readdirSync } = await import('node:fs');
+  const dataDir = mkdtempSync(join(tmpdir(), 'ptr-app-'));
+  await setup({ dataDir, config: { token: 'ptr_wrong_secret' } });
+  const files = readdirSync(dataDir);
+  assert.deepEqual(files, ['portainer.json']);
+  const content = readFileSync(join(dataDir, 'portainer.json'), 'utf8');
+  assert.match(content, /refusals/);
+  assert.ok(!content.includes('ptr_wrong_secret'));
+  assert.ok(!content.includes(TOKEN));
 });
 
 test('a device created later gets its states at once', async () => {

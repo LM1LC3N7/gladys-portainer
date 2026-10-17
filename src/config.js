@@ -12,8 +12,13 @@ export const DEFAULTS = Object.freeze({
   stats_interval: '60',
 });
 
-/** Portainer's own default ports. */
-export const DEFAULT_PORTS = Object.freeze({ 'http:': 9000, 'https:': 9443 });
+/** A bare address (no scheme): https on Portainer's own port. */
+export const BARE_PORT = 9443;
+/** An address with a scheme and no port: the port of the scheme (a reverse proxy). */
+export const SCHEME_PORTS = Object.freeze({ 'http:': 80, 'https:': 443 });
+
+/** What an HTTP header accepts as a token: printable ASCII, no space. */
+const TOKEN_PATTERN = /^[\x21-\x7e]+$/;
 
 const text = (value) => (typeof value === 'string' ? value.trim() : '');
 const bool = (value, fallback) => {
@@ -23,8 +28,10 @@ const bool = (value, fallback) => {
 };
 
 /**
- * The address of Portainer: `https://host:port[/path]`, `http://...`, or a
- * bare `host[:port]` read as https (port 9443 when none is typed). A path is
+ * The address of Portainer: `https://host:port[/path]`, `http://...` (443 /
+ * 80 when no port is typed, like a browser: Portainer behind a reverse
+ * proxy), or a bare `host[:port]` read as https (port 9443, Portainer's own,
+ * when none is typed). A path is
  * kept (Portainer behind a reverse proxy), a trailing `/api` dropped.
  * Credentials, a query and a fragment are refused (an address ends up in logs).
  *   -> { base, origin, protocol, hostname, port } or { error: 'empty' | 'invalid' | 'credentials' }
@@ -52,7 +59,9 @@ export function parsePortainerUrl(value) {
   const typedPort = /^[a-z][a-z0-9+.-]*:\/\/(?:\[[^\]]*\]|[^/:?#]*):(\d+)/i.exec(
     hasScheme ? raw : `https://${raw}`,
   );
-  const port = typedPort ? Number(typedPort[1]) : DEFAULT_PORTS[url.protocol];
+  let port = BARE_PORT;
+  if (typedPort) port = Number(typedPort[1]);
+  else if (hasScheme) port = SCHEME_PORTS[url.protocol];
   if (!(port > 0 && port < 65536)) return { error: 'invalid' };
   const hostname = url.hostname.toLowerCase();
   const origin = `${url.protocol}//${hostname}:${port}`;
@@ -84,13 +93,20 @@ export function normalizeConfig(raw = {}) {
   const pick = (key, list) => (list.includes(String(raw[key])) ? String(raw[key]) : DEFAULTS[key]);
   const typedFingerprint = text(raw.certificate_fingerprint);
   const fingerprint = typedFingerprint ? normalizeFingerprint(typedFingerprint) : null;
+  const token = typeof raw.token === 'string' ? raw.token.trim() : '';
+  const allowSelfSigned = bool(raw.allow_self_signed, DEFAULTS.allow_self_signed);
   return {
     portainer: portainer.error ? null : portainer,
     urlError: portainer.error ?? null,
-    token: typeof raw.token === 'string' ? raw.token.trim() : '',
-    allowSelfSigned: bool(raw.allow_self_signed, DEFAULTS.allow_self_signed),
+    token,
+    // An invisible character pasted with the token (U+200B...) would make
+    // Node refuse the header: said to the user, never sent.
+    tokenInvalid: token !== '' && !TOKEN_PATTERN.test(token),
+    allowSelfSigned,
     fingerprint,
     fingerprintInvalid: typedFingerprint !== '' && fingerprint === null,
+    // A certificate option with http:// would be ignored in silence: refused.
+    tlsOverHttp: portainer.protocol === 'http:' && (allowSelfSigned || typedFingerprint !== ''),
     filter: parseEnvironmentFilter(raw.environments),
     allowControl: bool(raw.allow_container_control, DEFAULTS.allow_container_control),
     statsSeconds: Number(pick('stats_interval', STATS_INTERVALS)),

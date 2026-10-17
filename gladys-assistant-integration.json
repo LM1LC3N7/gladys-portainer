@@ -18,8 +18,8 @@
       "type": "section",
       "label": { "en": "How it works", "fr": "Fonctionnement" },
       "description": {
-        "en": "Gladys reads your Docker containers through the REST API of Portainer (CE or BE 2.x), with an access token. Each container becomes a Gladys device (Discovery tab): running, healthy (healthcheck), CPU and memory, a restart button; each Portainer environment becomes a device with its containers running and stopped. Create the token with a dedicated Portainer user that sees only the environments Gladys needs (see the documentation). Unofficial integration, not affiliated with Portainer.io.",
-        "fr": "Gladys lit vos conteneurs Docker par l'API REST de Portainer (CE ou BE 2.x), avec un jeton d'accès. Chaque conteneur devient un appareil Gladys (onglet Découverte) : en marche, sain (healthcheck), CPU et mémoire, un bouton de redémarrage ; chaque environnement Portainer devient un appareil avec ses conteneurs en marche et arrêtés. Créez le jeton avec un utilisateur Portainer dédié qui ne voit que les environnements utiles à Gladys (voir la documentation). Intégration non officielle, sans lien avec Portainer.io."
+        "en": "Gladys reads your Docker containers through the REST API of Portainer (CE or BE 2.x), with an access token. Each container becomes a Gladys device (Discovery tab): running, healthy (healthcheck), CPU and memory, start, stop and restart buttons; each Portainer environment becomes a device with its containers running and stopped. Create the token with a dedicated Portainer user that sees only the environments Gladys needs (see the documentation). Unofficial integration, not affiliated with Portainer.io.",
+        "fr": "Gladys lit vos conteneurs Docker par l'API REST de Portainer (CE ou BE 2.x), avec un jeton d'accès. Chaque conteneur devient un appareil Gladys (onglet Découverte) : en marche, sain (healthcheck), CPU et mémoire, des boutons démarrer, arrêter et redémarrer ; chaque environnement Portainer devient un appareil avec ses conteneurs en marche et arrêtés. Créez le jeton avec un utilisateur Portainer dédié qui ne voit que les environnements utiles à Gladys (voir la documentation). Intégration non officielle, sans lien avec Portainer.io."
       },
       "links": [
         {
@@ -33,8 +33,8 @@
       "type": "string",
       "label": { "en": "Portainer address", "fr": "Adresse de Portainer" },
       "description": {
-        "en": "The address of Portainer on your network: https://<IP>:9443 (a path is kept, for a reverse proxy). A bare address is read as https on port 9443. Avoid http://<IP>:9000: the token would cross your network in clear.",
-        "fr": "L'adresse de Portainer sur votre réseau : https://<IP>:9443 (un chemin est gardé, pour un proxy inverse). Une adresse seule est lue en https sur le port 9443. Évitez http://<IP>:9000 : le jeton traverserait votre réseau en clair."
+        "en": "The address of Portainer on your network: https://<IP>:9443. A bare address (no https://) is read as https on port 9443; with https:// and no port, port 443 (a reverse proxy, a path is kept). Avoid http://<IP>:9000: the token would cross your network in clear.",
+        "fr": "L'adresse de Portainer sur votre réseau : https://<IP>:9443. Une adresse seule (sans https://) est lue en https sur le port 9443 ; avec https:// et sans port, le port 443 (un proxy inverse, un chemin est gardé). Évitez http://<IP>:9000 : le jeton traverserait votre réseau en clair."
       },
       "placeholder": {
         "en": "e.g. https://192.168.1.10:9443",
@@ -58,8 +58,8 @@
       "type": "section",
       "label": { "en": "Certificate", "fr": "Certificat" },
       "description": {
-        "en": "By default the certificate of Portainer must come from a known authority. Portainer generates a self-signed one: either tick the box below (the certificate seen at the first connection is remembered), or type its SHA-256 fingerprint (safer: nothing else is ever accepted). In both cases a different certificate is refused before the token is sent.",
-        "fr": "Par défaut le certificat de Portainer doit venir d'une autorité reconnue. Portainer en génère un auto-signé : cochez la case ci-dessous (le certificat vu à la première connexion est mémorisé), ou saisissez son empreinte SHA-256 (plus sûr : rien d'autre n'est jamais accepté). Dans les deux cas un autre certificat est refusé avant l'envoi du jeton."
+        "en": "By default the certificate of Portainer must come from a known authority. Portainer generates a self-signed one: either tick the box below (the certificate seen at the first connection is remembered: the token goes to whoever answers that first connection), or type its SHA-256 fingerprint (safer: nothing else is ever accepted, not even the first time). After the first connection, a different certificate is refused before the token is sent. Https only.",
+        "fr": "Par défaut le certificat de Portainer doit venir d'une autorité reconnue. Portainer en génère un auto-signé : cochez la case ci-dessous (le certificat vu à la première connexion est mémorisé : le jeton part vers celui qui répond à cette première connexion), ou saisissez son empreinte SHA-256 (plus sûr : rien d'autre n'est jamais accepté, même la première fois). Après la première connexion, un autre certificat est refusé avant l'envoi du jeton. En https seulement."
       }
     },
     {
@@ -106,8 +106,8 @@
       "type": "section",
       "label": { "en": "Commands", "fr": "Commandes" },
       "description": {
-        "en": "By default Gladys only reads: starting, stopping and restarting containers are refused unless you allow them below. Even then, Gladys never stops nor restarts Gladys itself, its integrations, Portainer or its agent (recognized by image and by name). The user of the token needs the right to operate the containers.",
-        "fr": "Par défaut Gladys ne fait que lire : démarrer, arrêter et redémarrer des conteneurs sont refusés tant que vous ne les autorisez pas ci-dessous. Même alors, Gladys n'arrête ni ne redémarre jamais Gladys elle-même, ses intégrations, Portainer ou son agent (reconnus par image et par nom). L'utilisateur du jeton doit avoir le droit d'agir sur les conteneurs."
+        "en": "By default Gladys only reads: the Start, Stop and Restart buttons are refused unless you allow them below (the running state is never a switch: no voice assistant nor \"turn everything off\" can stop a container). Even then, Gladys never stops nor restarts Gladys itself, its integrations, Portainer, its agent, nor a container connected to the Docker socket. Other vital containers (reverse proxy, DNS, MQTT broker) are not recognized: see the documentation. The user of the token needs the right to operate the containers.",
+        "fr": "Par défaut Gladys ne fait que lire : les boutons Démarrer, Arrêter et Redémarrer sont refusés tant que vous ne les autorisez pas ci-dessous (l'état en marche n'est jamais un interrupteur : ni assistant vocal ni « tout éteindre » ne peut arrêter un conteneur). Même alors, Gladys n'arrête ni ne redémarre jamais Gladys elle-même, ses intégrations, Portainer, son agent, ni un conteneur relié au socket Docker. Les autres conteneurs vitaux (proxy inverse, DNS, broker MQTT) ne sont pas reconnus : voir la documentation. L'utilisateur du jeton doit avoir le droit d'agir sur les conteneurs."
       }
     },
     {

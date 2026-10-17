@@ -2,8 +2,8 @@
 // Gladys devices (pure).
 //
 //   container    `ext:<selector>:container:<environment id>-<container name>`
-//                one per Docker container: running (switch: start / stop),
-//                healthy, CPU, memory, restart (button)
+//                one per Docker container: running and healthy (read only),
+//                CPU, memory, start / stop / restart (buttons)
 //   environment  `ext:<selector>:environment:<environment id>`
 //                one per Portainer environment: containers running / stopped
 //
@@ -44,13 +44,11 @@ export function buildContainerDevice(gladys, environment, container, { withEnvir
       {
         name: 'Running',
         external_id: ids.feature(FEATURES.RUNNING),
-        // On: start, off: stop (both refused unless allowed in the configuration).
-        category: C.SWITCH,
-        type: T.SWITCH.BINARY,
-        min: 0,
-        max: 1,
-        read_only: false,
-        has_feedback: true,
+        // Read only, never a switch: the core hands every switch to the voice
+        // assistants (Google Home, Alexa, HomeKit), MCP and the switch scene
+        // actions, so "turn everything off" would stop the containers. Start
+        // and stop are buttons below.
+        ...readOnly({ category: C.UNKNOWN, type: T.SENSOR.BINARY, min: 0, max: 1 }),
         keep_history: true,
       },
       {
@@ -66,7 +64,8 @@ export function buildContainerDevice(gladys, environment, container, { withEnvir
         external_id: ids.feature(FEATURES.CPU),
         // No core category lists a percent for a processor load: no unit
         // (TODO.md, "Decisions"); 100 = one CPU busy, like `docker stats`.
-        ...readOnly({ category: C.UNKNOWN, type: T.SENSOR.DECIMAL, min: 0, max: 25_600 }),
+        // `unknown`/`unknown`: the pair the front translates.
+        ...readOnly({ category: C.UNKNOWN, type: T.UNKNOWN.UNKNOWN, min: 0, max: 25_600 }),
         keep_history: true,
       },
       {
@@ -81,20 +80,25 @@ export function buildContainerDevice(gladys, environment, container, { withEnvir
         }),
         keep_history: true,
       },
-      {
-        name: 'Restart',
-        external_id: ids.feature(FEATURES.RESTART),
-        category: C.BUTTON,
-        type: T.BUTTON.PUSH,
-        min: 0,
-        max: 1,
-        read_only: false,
-        has_feedback: false,
-        keep_history: false,
-      },
+      button(ids, FEATURES.START, 'Start'),
+      button(ids, FEATURES.STOP, 'Stop'),
+      button(ids, FEATURES.RESTART, 'Restart'),
     ],
   };
 }
+
+/** A push button: start, stop, restart (refused unless allowed in the configuration). */
+const button = (ids, key, name) => ({
+  name,
+  external_id: ids.feature(key),
+  category: C.BUTTON,
+  type: T.BUTTON.PUSH,
+  min: 0,
+  max: 1,
+  read_only: false,
+  has_feedback: false,
+  keep_history: false,
+});
 
 export function buildEnvironmentDevice(gladys, environment) {
   const ids = environmentIds(gladys, environment.id);

@@ -168,6 +168,32 @@ test('https, typed fingerprint: exactly this certificate, nothing else', async (
   }
 });
 
+test('a header Node refuses (invisible character) is a failure, never a crash', async () => {
+  const plain = await serve(okJson);
+  const secure = await serve(okJson, { secure: true });
+  try {
+    const headers = { 'x-api-key': 'ptr_a​b' };
+    await assert.rejects(
+      httpRequest(plain.url, { timeout: 2000, maxBytes: 1000, headers }),
+      (err) => err.name === 'PortainerError' && err.notSent === true,
+    );
+    // After the handshake (secureConnect): the case that crashed.
+    await assert.rejects(
+      httpRequest(secure.url, {
+        timeout: 2000,
+        maxBytes: 1000,
+        headers,
+        tls: { trustOnFirstUse: true },
+      }),
+      (err) => err.name === 'PortainerError' && err.notSent === true,
+    );
+    assert.equal(plain.requests.length + secure.requests.length, 0);
+  } finally {
+    await plain.close();
+    await secure.close();
+  }
+});
+
 test('a command that cannot connect in time is not sent', async () => {
   // A TLS server that never completes the handshake (plain TCP that stays silent).
   const sockets = [];
@@ -209,7 +235,7 @@ test('the client over the real transport: the token in X-API-Key only, never in 
     );
     const containers = await client.containers(1);
     assert.equal(containers.length, 5);
-    assert.deepEqual(await client.stats(1, containers[0].id), { cpu: 20, memory: 200 });
+    assert.deepEqual(await client.stats(1, containers[0].id), { cpu: 20, memory: 209.7 });
     await client.command(1, containers.find((c) => c.name === 'db').id, 'stop');
     assert.equal(fake.containers[1][1].State, 'exited');
     for (const request of fake.requests) {
