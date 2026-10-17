@@ -16,8 +16,8 @@ its only runtime dependency. It started from the official JavaScript template.
 ```bash
 npm install
 npm test                                  # node --test, the built-in runner
-node --test test/devices.test.js          # one file
-node --test --test-name-pattern "plug"    # tests whose name matches
+node --test test/app.test.js              # one file
+node --test --test-name-pattern "stop"    # tests whose name matches
 npm run lint                              # ESLint
 npm run format:check                      # Prettier, as the CI runs it
 npm run format                            # Prettier, fix in place
@@ -31,24 +31,40 @@ pushing.
 ## Architecture
 
 ```
-index.js                          SDK wiring only: handlers registered before connect()
-src/devices/index.js              registry of the device blueprints + dispatch helpers
-src/devices/<type>.js             one device type per file (buildDevice, onPoll, onSetValue...)
-src/scenes.js                     scene action handlers (manifest `scene_actions`)
-src/widgets.js                    dashboard widget handlers (manifest `widgets`)
-src/config.js                     DEFAULT_CONFIG (mirrors the manifest defaults) + normalization
-src/weather.js                    example driver (Open-Meteo)
-gladys-assistant-integration.json manifest: name, config_schema, actions, image...
+index.js                          SDK wiring only (src/handlers.js registers the handlers)
+src/handlers.js                   every SDK handler, wired to the app (shared with the tests)
+src/app.js                        PortainerApp: lifecycle, loops, statistics, commands, trigger
+src/portainer/client.js           REST API of Portainer and its Docker proxy (X-API-Key)
+src/portainer/http.js             the only network access (node:http / https, TLS pin)
+src/portainer/parse.js            answers -> plain objects, docker stats, protected containers
+src/portainer/errors.js           PortainerError, token refusal
+src/budget.js                     the states-per-minute window (300/min limit of Gladys)
+src/store.js                      /data: TLS pin, refusals, 429 pause (never the token)
+src/devices.js                    the Gladys devices and their external ids (pure)
+src/config.js                     DEFAULTS (mirror the manifest defaults) + normalization
+src/constants.js, src/i18n.js     keys, limits, timings; runtime texts (en/fr)
+gladys-assistant-integration.json manifest: name, config_schema, actions, triggers...
 docs/en.md, docs/fr.md            user documentation, re-hosted by Gladys (mandatory)
-test/                             node --test, against the SDK's fake Gladys (integration-sdk/testing)
+test/                             node --test: SDK fake Gladys, fake Portainer, loopback servers
+scripts/cover.mjs                 generates cover.png (plain Node)
 .github/scripts/release.mjs       release helpers (manifest bump, changelog), tested in test/
 ```
+
+Safety rules of this integration (TODO.md, "Decisions"): start, stop and
+restart stay refused unless `allow_container_control`; stop and restart are
+always refused for Gladys, Portainer, its agent and our own container (image
+and name, on a fresh inspect); every command is serialized, re-reads the
+container before acting and sends nothing past 3.5 s; a token Portainer
+refused (401) is never retried without a user action; the certificate is
+checked before the token is written.
 
 ## Rules
 
 - **External ids are forever.** Build them with
   `gladys.externalIds(type, platformId)`, `platformId` being the unique id the
-  platform gives the device (serial, cloud id, MAC), never a label. Gladys keys
+  platform gives the device (serial, cloud id, MAC), never a label. Here:
+  `<environment id>-<container name>`, because the Docker id changes at every
+  recreation of a container. Gladys keys
   devices, their history, scenes and dashboards on them: changing one creates a
   new device and orphans the old one. The same goes for every key users store:
   manifest `config_schema`, `actions`, widget and scene keys, feature keys.

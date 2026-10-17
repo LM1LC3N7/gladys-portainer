@@ -1,177 +1,219 @@
 {
   "manifest_version": 1,
   "type": "device",
-  "name": "Demo Devices Template",
+  "name": "Portainer",
   "description": {
-    "en": "Starter template showing sensors, a switch, a dimmable light and a smart plug.",
-    "fr": "Template de démarrage : capteurs, interrupteur, lampe variable et prise connectée."
+    "en": "Your Docker containers through Portainer: running, health, CPU, memory, start/stop.",
+    "fr": "Vos conteneurs Docker via Portainer : en marche, santé, CPU, mémoire, démarrer/arrêter."
   },
-  "version": "1.0.0",
-  "docker_image": "ghcr.io/gladysassistant/integration-template-js:1.0.0",
+  "version": "0.1.0",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-portainer:0.1.0",
   "gladys_version": ">=5.1.0",
-  "cover_image": "https://raw.githubusercontent.com/GladysAssistant/integration-template-js/master/cover.png",
-  "categories": ["lighting", "security", "environment"],
-  "transports": ["local", "cloud"],
+  "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-portainer/main/cover.png",
+  "categories": ["network", "services"],
+  "transports": ["local"],
   "config_schema": [
     {
       "key": "intro",
       "type": "section",
-      "label": { "en": "Getting started", "fr": "Pour commencer" },
+      "label": { "en": "How it works", "fr": "Fonctionnement" },
       "description": {
-        "en": "The demo weather station reads real data from the free Open-Meteo API: pick the coordinates to observe. No account, no API key.",
-        "fr": "La station météo de démonstration lit de vraies données via l'API gratuite Open-Meteo : choisissez les coordonnées à observer. Pas de compte, pas de clé d'API."
+        "en": "Gladys reads your Docker containers through the REST API of Portainer (CE or BE 2.x), with an access token. Each container becomes a Gladys device (Discovery tab): running, healthy (healthcheck), CPU and memory, a restart button; each Portainer environment becomes a device with its containers running and stopped. Create the token with a dedicated Portainer user that sees only the environments Gladys needs (see the documentation). Unofficial integration, not affiliated with Portainer.io.",
+        "fr": "Gladys lit vos conteneurs Docker par l'API REST de Portainer (CE ou BE 2.x), avec un jeton d'accès. Chaque conteneur devient un appareil Gladys (onglet Découverte) : en marche, sain (healthcheck), CPU et mémoire, un bouton de redémarrage ; chaque environnement Portainer devient un appareil avec ses conteneurs en marche et arrêtés. Créez le jeton avec un utilisateur Portainer dédié qui ne voit que les environnements utiles à Gladys (voir la documentation). Intégration non officielle, sans lien avec Portainer.io."
       },
       "links": [
         {
-          "url": "https://open-meteo.com/en/docs",
-          "label": { "en": "Open-Meteo documentation", "fr": "Documentation Open-Meteo" }
+          "url": "https://docs.portainer.io/api/access",
+          "label": { "en": "Portainer access tokens", "fr": "Jetons d'accès Portainer" }
         }
       ]
     },
     {
-      "key": "latitude",
-      "type": "number",
-      "label": { "en": "Latitude", "fr": "Latitude" },
+      "key": "url",
+      "type": "string",
+      "label": { "en": "Portainer address", "fr": "Adresse de Portainer" },
       "description": {
-        "en": "Latitude used for the demo weather sensor.",
-        "fr": "Latitude utilisée par le capteur météo de démonstration."
+        "en": "The address of Portainer on your network: https://<IP>:9443 (a path is kept, for a reverse proxy). A bare address is read as https on port 9443. Avoid http://<IP>:9000: the token would cross your network in clear.",
+        "fr": "L'adresse de Portainer sur votre réseau : https://<IP>:9443 (un chemin est gardé, pour un proxy inverse). Une adresse seule est lue en https sur le port 9443. Évitez http://<IP>:9000 : le jeton traverserait votre réseau en clair."
       },
-      "placeholder": { "en": "e.g. 48.8566", "fr": "ex. 48.8566" },
-      "required": true,
-      "default": 48.8566,
-      "min": -90,
-      "max": 90
+      "placeholder": {
+        "en": "e.g. https://192.168.1.10:9443",
+        "fr": "ex. https://192.168.1.10:9443"
+      },
+      "required": true
     },
     {
-      "key": "longitude",
-      "type": "number",
-      "label": { "en": "Longitude", "fr": "Longitude" },
+      "key": "token",
+      "type": "secret",
+      "label": { "en": "Access token", "fr": "Jeton d'accès" },
       "description": {
-        "en": "Longitude used for the demo weather sensor.",
-        "fr": "Longitude utilisée par le capteur météo de démonstration."
+        "en": "In Portainer: My account, Access tokens, Add access token. Kept by Gladys in its database, never shown again, sent only to Portainer, in the X-API-Key header.",
+        "fr": "Dans Portainer : Mon compte, Access tokens, Add access token. Gardé par Gladys dans sa base, jamais réaffiché, envoyé seulement à Portainer, dans l'en-tête X-API-Key."
       },
-      "placeholder": { "en": "e.g. 2.3522", "fr": "ex. 2.3522" },
-      "required": true,
-      "default": 2.3522,
-      "min": -180,
-      "max": 180
+      "placeholder": { "en": "ptr_...", "fr": "ptr_..." },
+      "required": true
     },
     {
-      "key": "unit",
+      "key": "tls_section",
+      "type": "section",
+      "label": { "en": "Certificate", "fr": "Certificat" },
+      "description": {
+        "en": "By default the certificate of Portainer must come from a known authority. Portainer generates a self-signed one: either tick the box below (the certificate seen at the first connection is remembered), or type its SHA-256 fingerprint (safer: nothing else is ever accepted). In both cases a different certificate is refused before the token is sent.",
+        "fr": "Par défaut le certificat de Portainer doit venir d'une autorité reconnue. Portainer en génère un auto-signé : cochez la case ci-dessous (le certificat vu à la première connexion est mémorisé), ou saisissez son empreinte SHA-256 (plus sûr : rien d'autre n'est jamais accepté). Dans les deux cas un autre certificat est refusé avant l'envoi du jeton."
+      }
+    },
+    {
+      "key": "allow_self_signed",
+      "type": "boolean",
+      "label": {
+        "en": "Accept the self-signed certificate",
+        "fr": "Accepter le certificat auto-signé"
+      },
+      "description": {
+        "en": "On: the certificate seen at the first connection is trusted and remembered; a different one later is refused until you press \"Trust the new certificate\".",
+        "fr": "Activé : le certificat vu à la première connexion est accepté et mémorisé ; un autre ensuite est refusé tant que vous n'appuyez pas sur « Faire confiance au nouveau certificat »."
+      },
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "certificate_fingerprint",
+      "type": "string",
+      "label": {
+        "en": "Certificate fingerprint (SHA-256, optional)",
+        "fr": "Empreinte du certificat (SHA-256, facultatif)"
+      },
+      "description": {
+        "en": "Pins this certificate: Portainer must present exactly it. The fingerprint is shown by your browser (certificate details) or by openssl (see the documentation).",
+        "fr": "Épingle ce certificat : Portainer doit présenter exactement celui-ci. L'empreinte est affichée par votre navigateur (détails du certificat) ou par openssl (voir la documentation)."
+      },
+      "placeholder": { "en": "e.g. AB:12:...:EF", "fr": "ex. AB:12:...:EF" },
+      "required": false
+    },
+    {
+      "key": "environments",
+      "type": "string",
+      "label": { "en": "Environments (optional)", "fr": "Environnements (facultatif)" },
+      "description": {
+        "en": "Names or ids of the Portainer environments to follow, separated by commas. Empty: every Docker environment the token sees (Edge and Kubernetes environments are left out).",
+        "fr": "Noms ou identifiants des environnements Portainer à suivre, séparés par des virgules. Vide : tous les environnements Docker que voit le jeton (les environnements Edge et Kubernetes sont ignorés)."
+      },
+      "placeholder": { "en": "e.g. local, nas", "fr": "ex. local, nas" },
+      "required": false
+    },
+    {
+      "key": "security_section",
+      "type": "section",
+      "label": { "en": "Commands", "fr": "Commandes" },
+      "description": {
+        "en": "By default Gladys only reads: starting, stopping and restarting containers are refused unless you allow them below. Even then, Gladys never stops nor restarts Gladys itself, its integrations, Portainer or its agent (recognized by image and by name). The user of the token needs the right to operate the containers.",
+        "fr": "Par défaut Gladys ne fait que lire : démarrer, arrêter et redémarrer des conteneurs sont refusés tant que vous ne les autorisez pas ci-dessous. Même alors, Gladys n'arrête ni ne redémarre jamais Gladys elle-même, ses intégrations, Portainer ou son agent (reconnus par image et par nom). L'utilisateur du jeton doit avoir le droit d'agir sur les conteneurs."
+      }
+    },
+    {
+      "key": "allow_container_control",
+      "type": "boolean",
+      "label": {
+        "en": "Allow starting, stopping and restarting containers",
+        "fr": "Autoriser le démarrage, l'arrêt et le redémarrage des conteneurs"
+      },
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "polling_section",
+      "type": "section",
+      "label": { "en": "Refresh", "fr": "Rafraîchissement" },
+      "description": {
+        "en": "Gladys reads the containers (running, health) every 30 seconds. The CPU and memory figures cost more to Docker: they are read at the pace below, only for the containers created in Gladys that run, 25 per round at most.",
+        "fr": "Gladys lit les conteneurs (en marche, santé) toutes les 30 secondes. Les chiffres de CPU et de mémoire coûtent plus à Docker : ils sont lus au rythme ci-dessous, seulement pour les conteneurs créés dans Gladys qui tournent, 25 par tour au plus."
+      }
+    },
+    {
+      "key": "stats_interval",
       "type": "select",
-      "label": { "en": "Temperature unit", "fr": "Unité de température" },
-      "required": false,
-      "default": "celsius",
+      "label": { "en": "CPU and memory", "fr": "CPU et mémoire" },
+      "required": true,
+      "default": "60",
       "options": [
-        { "value": "celsius", "label": { "en": "Celsius", "fr": "Celsius" } },
-        { "value": "fahrenheit", "label": { "en": "Fahrenheit", "fr": "Fahrenheit" } }
+        { "value": "0", "label": { "en": "Not read", "fr": "Non lus" } },
+        { "value": "60", "label": { "en": "Every minute", "fr": "Toutes les minutes" } },
+        { "value": "120", "label": { "en": "Every 2 minutes", "fr": "Toutes les 2 minutes" } },
+        { "value": "300", "label": { "en": "Every 5 minutes", "fr": "Toutes les 5 minutes" } },
+        { "value": "600", "label": { "en": "Every 10 minutes", "fr": "Toutes les 10 minutes" } }
       ]
-    },
-    {
-      "key": "poll_frequency",
-      "type": "number",
-      "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
-      "description": {
-        "en": "How often sensors are polled, in seconds (one minute minimum).",
-        "fr": "Fréquence d'interrogation des capteurs, en secondes (une minute minimum)."
-      },
-      "required": false,
-      "default": 300,
-      "min": 60,
-      "max": 3600
     }
   ],
   "actions": [
     {
-      "key": "test_weather",
-      "label": { "en": "Test the weather provider", "fr": "Tester le fournisseur météo" },
+      "key": "test_connection",
+      "label": { "en": "Test the connection", "fr": "Tester la connexion" },
+      "description": {
+        "en": "Connects to Portainer (even after a refused token) and lists the environments and containers.",
+        "fr": "Se connecte à Portainer (même après un jeton refusé) et liste les environnements et conteneurs."
+      },
       "timeout_seconds": 30
     },
     {
-      "key": "identify",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ]
+      "key": "trust_new_certificate",
+      "label": { "en": "Trust the new certificate", "fr": "Faire confiance au nouveau certificat" },
+      "description": {
+        "en": "Only after you renewed the certificate of Portainer: forgets the remembered one and trusts the next.",
+        "fr": "Seulement après avoir renouvelé le certificat de Portainer : oublie celui mémorisé et accepte le suivant."
+      },
+      "timeout_seconds": 30
     }
   ],
   "scene_triggers": [
     {
-      "key": "motion_detected",
-      "label": { "en": "Motion detected", "fr": "Mouvement détecté" },
+      "key": "container_problem",
+      "label": {
+        "en": "Container stopped or unhealthy",
+        "fr": "Conteneur arrêté ou malsain"
+      },
       "description": {
-        "en": "A demo motion sensor saw a person or an animal move.",
-        "fr": "Un détecteur de démonstration a vu bouger une personne ou un animal."
+        "en": "A running container stopped (exited or dead), or its healthcheck turned unhealthy. Read every 30 seconds: the scene starts up to 30 seconds after.",
+        "fr": "Un conteneur en marche s'est arrêté (exited ou dead), ou son healthcheck est passé à malsain. Lu toutes les 30 secondes : la scène démarre jusqu'à 30 secondes après."
       },
       "fields": [
         {
-          "key": "device",
+          "key": "container",
           "type": "select",
           "source": "devices",
-          "label": { "en": "Sensor", "fr": "Détecteur" }
+          "required": false,
+          "label": { "en": "Container (empty: any)", "fr": "Conteneur (vide : tous)" }
         },
         {
-          "key": "target",
-          "type": "multi_select",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" },
+          "key": "problem",
+          "type": "select",
+          "required": false,
+          "label": { "en": "Problem (empty: any)", "fr": "Problème (vide : tous)" },
           "options": [
-            { "value": "person", "label": { "en": "Person", "fr": "Personne" } },
-            { "value": "animal", "label": { "en": "Animal", "fr": "Animal" } }
+            { "value": "stopped", "label": { "en": "Stopped", "fr": "Arrêté" } },
+            { "value": "unhealthy", "label": { "en": "Unhealthy", "fr": "Malsain" } }
           ]
         }
       ],
       "variables": [
         {
-          "key": "target",
+          "key": "container_name",
           "type": "string",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" }
+          "label": { "en": "Container name", "fr": "Nom du conteneur" }
+        },
+        {
+          "key": "environment_name",
+          "type": "string",
+          "label": { "en": "Environment name", "fr": "Nom de l'environnement" }
+        },
+        {
+          "key": "problem",
+          "type": "string",
+          "label": {
+            "en": "Problem (stopped, unhealthy)",
+            "fr": "Problème (stopped, unhealthy)"
+          }
         }
       ]
-    }
-  ],
-  "scene_actions": [
-    {
-      "key": "identify_device",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "description": {
-        "en": "Make a device signal itself (the demo light blinks).",
-        "fr": "Fait se signaler un appareil (la lampe de démonstration clignote)."
-      },
-      "timeout_seconds": 15,
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "key": "signalled",
-          "type": "boolean",
-          "label": { "en": "Device signalled", "fr": "Appareil signalé" }
-        }
-      ]
-    }
-  ],
-  "widgets": [
-    {
-      "key": "demo_status",
-      "label": { "en": "Demo status", "fr": "État de la démo" },
-      "description": {
-        "en": "Live temperature and plug power, plug connection and observed location.",
-        "fr": "Température et puissance en direct, connexion de la prise, position observée."
-      },
-      "icon": "activity",
-      "action_timeout_seconds": 15
     }
   ]
 }

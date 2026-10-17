@@ -1,33 +1,70 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeConfig, DEFAULT_CONFIG } from '../src/config.js';
+import {
+  DEFAULTS,
+  matchesFilter,
+  normalizeConfig,
+  parseEnvironmentFilter,
+  parsePortainerUrl,
+} from '../src/config.js';
+import { normalizeFingerprint } from '../src/portainer/http.js';
 
-test('normalizeConfig returns the defaults when called with no argument', () => {
-  assert.deepEqual(normalizeConfig(), DEFAULT_CONFIG);
+test('the address: scheme, default ports, a path for a reverse proxy', () => {
+  assert.deepEqual(parsePortainerUrl('192.168.1.10'), {
+    base: 'https://192.168.1.10:9443',
+    origin: 'https://192.168.1.10:9443',
+    protocol: 'https:',
+    hostname: '192.168.1.10',
+    port: 9443,
+  });
+  assert.equal(parsePortainerUrl('http://nas.local').base, 'http://nas.local:9000');
+  assert.equal(parsePortainerUrl('https://nas.local:443').port, 443, 'a typed default port stays');
+  assert.equal(
+    parsePortainerUrl('https://Example.org/portainer/').base,
+    'https://example.org:9443/portainer',
+  );
+  assert.equal(
+    parsePortainerUrl('https://example.org/portainer/api').base,
+    'https://example.org:9443/portainer',
+  );
+  assert.equal(parsePortainerUrl('https://[::1]:9443').hostname, '[::1]');
+  assert.deepEqual(parsePortainerUrl(''), { error: 'empty' });
+  assert.deepEqual(parsePortainerUrl('https://u:p@h'), { error: 'credentials' });
+  assert.deepEqual(parsePortainerUrl('https://h/?x=1'), { error: 'invalid' });
+  assert.deepEqual(parsePortainerUrl('ftp://h'), { error: 'invalid' });
+  assert.deepEqual(parsePortainerUrl('https://h:99999'), { error: 'invalid' });
 });
 
-test('normalizeConfig keeps user values over the defaults', () => {
-  const config = normalizeConfig({ latitude: 45.5, longitude: -73.6, unit: 'fahrenheit' });
-  assert.equal(config.latitude, 45.5);
-  assert.equal(config.longitude, -73.6);
-  assert.equal(config.unit, 'fahrenheit');
+test('the environment filter: ids and names, any case', () => {
+  assert.equal(parseEnvironmentFilter(''), null);
+  const filter = parseEnvironmentFilter(' Local ; 7, nas ');
+  assert.ok(matchesFilter(filter, { id: 1, name: 'local' }));
+  assert.ok(matchesFilter(filter, { id: 7, name: 'other' }));
+  assert.ok(matchesFilter(filter, { id: 2, name: 'NAS' }));
+  assert.ok(!matchesFilter(filter, { id: 3, name: 'edge' }));
+  assert.ok(matchesFilter(null, { id: 3, name: 'edge' }));
 });
 
-test('normalizeConfig coerces numeric strings coming from a form', () => {
-  const config = normalizeConfig({ latitude: '48.8', longitude: '2.3', poll_frequency: '600' });
-  assert.equal(config.latitude, 48.8);
-  assert.equal(config.longitude, 2.3);
-  assert.equal(config.poll_frequency, 600);
-  assert.equal(typeof config.poll_frequency, 'number');
+test('fingerprints: any spelling, SHA-256 only', () => {
+  const colons = Array.from({ length: 32 }, (_, i) => (i % 16).toString(16) + 'a').join(':');
+  const bare = colons.replace(/:/g, '');
+  assert.equal(normalizeFingerprint(bare), colons.toUpperCase());
+  assert.equal(normalizeFingerprint(`SHA256 Fingerprint=${colons}`), colons.toUpperCase());
+  assert.equal(normalizeFingerprint(colons.toLowerCase().replace(/:/g, ' ')), colons.toUpperCase());
+  assert.equal(normalizeFingerprint('AB:CD'), null);
+  assert.equal(normalizeFingerprint('z'.repeat(64)), null);
 });
 
-test('normalizeConfig falls back to the default for a missing numeric field', () => {
-  const config = normalizeConfig({ unit: 'celsius' });
-  assert.equal(config.poll_frequency, DEFAULT_CONFIG.poll_frequency);
-});
-
-test('GLADYS_PREFER_LOCAL defaults to true and only an explicit false disables it', () => {
-  assert.equal(normalizeConfig().GLADYS_PREFER_LOCAL, true);
-  assert.equal(normalizeConfig({ GLADYS_PREFER_LOCAL: true }).GLADYS_PREFER_LOCAL, true);
-  assert.equal(normalizeConfig({ GLADYS_PREFER_LOCAL: false }).GLADYS_PREFER_LOCAL, false);
+test('normalizeConfig: defaults, safety off, token trimmed', () => {
+  const config = normalizeConfig({ url: 'h', token: '  ptr_x  ' });
+  assert.equal(config.token, 'ptr_x');
+  assert.equal(config.allowControl, false);
+  assert.equal(config.allowSelfSigned, false);
+  assert.equal(config.fingerprint, null);
+  assert.equal(config.statsSeconds, Number(DEFAULTS.stats_interval));
+  assert.equal(normalizeConfig({ stats_interval: '7' }).statsSeconds, 60);
+  assert.equal(normalizeConfig({ stats_interval: '0' }).statsSeconds, 0);
+  assert.equal(normalizeConfig({ allow_container_control: 'true' }).allowControl, true);
+  assert.equal(normalizeConfig({ certificate_fingerprint: 'nope' }).fingerprintInvalid, true);
+  assert.equal(normalizeConfig(null).urlError, 'empty');
 });
