@@ -10,6 +10,10 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Fixed
+
+- Status and Discovery republished after Gladys restarts.
+
 ## [0.1.1] - 2026-10-17
 
 ### Added

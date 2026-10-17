@@ -103,11 +103,13 @@ export class PortainerApp {
     this.inFlight = new Map();
     this.activeCommands = 0;
     this.stateVersion = 0;
-    this.lastStatus = null;
     this.reset();
   }
 
   reset() {
+    // Gladys keeps the status and the Discovery list in memory only: after a
+    // restart of the core (a new `connected`), both are published again.
+    this.lastStatus = null;
     this.online = false;
     this.blocked = false;
     this.pausedUntil = 0;

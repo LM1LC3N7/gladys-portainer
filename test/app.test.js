@@ -424,6 +424,31 @@ test('a refused token (401) is final, even across a restart; saving tries again'
   assert.ok(![...logs, ...second.logs].some((l) => l.includes('ptr_wrong') || l.includes(TOKEN)));
 });
 
+test('disconnection then reconnection (Gladys restarted): status and Discovery published again', async () => {
+  const { gladys, app } = await setup();
+  const statuses = gladys.fake.connectionStatuses.length;
+  const discoveries = gladys.fake.bodies('POST', '/discovered_device').length;
+  assert.ok(discoveries >= 1);
+  await gladys.disconnect();
+  await gladys.connect();
+  await app.queue;
+  assert.equal(gladys.fake.connectionStatuses.length, statuses + 1);
+  assert.equal(gladys.fake.connectionStatus.connected, true);
+  assert.equal(gladys.fake.bodies('POST', '/discovered_device').length, discoveries + 1);
+});
+
+test('reconnection with a refused token: the refusal is published again, nothing sent', async () => {
+  const { gladys, portainer, app } = await setup({ config: { token: 'ptr_wrong' } });
+  const statuses = gladys.fake.connectionStatuses.length;
+  const sent = portainer.requests.length;
+  await gladys.disconnect();
+  await gladys.connect();
+  await app.queue;
+  assert.equal(gladys.fake.connectionStatuses.length, statuses + 1);
+  assert.match(gladys.fake.connectionStatus.message.en, /refused the access token/);
+  assert.equal(portainer.requests.length, sent);
+});
+
 test('HTTP 429: every path pauses, kept across a restart', async () => {
   const dataDir = mkdtempSync(join(tmpdir(), 'ptr-app-'));
   const portainer = createFakePortainer();
