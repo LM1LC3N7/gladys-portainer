@@ -1,6 +1,6 @@
 {
   "name": "gladys-portainer",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "Gladys Assistant external integration for Portainer: Docker containers (running, health, CPU, memory, start/stop/restart) and environments, through the REST API of Portainer. Unofficial, not affiliated with Portainer.io.",
   "type": "module",

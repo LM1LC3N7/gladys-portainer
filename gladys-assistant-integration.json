@@ -6,8 +6,8 @@
     "en": "Your Docker containers through Portainer: running, health, CPU, memory, start/stop.",
     "fr": "Vos conteneurs Docker via Portainer : en marche, santé, CPU, mémoire, démarrer/arrêter."
   },
-  "version": "0.1.2",
-  "docker_image": "ghcr.io/lm1lc3n7/gladys-portainer:0.1.2",
+  "version": "0.1.3",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-portainer:0.1.3",
   "gladys_version": ">=5.1.0",
   "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-portainer/main/cover.png",
   "categories": ["network", "services"],
